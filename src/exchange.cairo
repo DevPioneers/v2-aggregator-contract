@@ -1,5 +1,5 @@
 use starknet::{ContractAddress, ClassHash};
-use avnu::models::Route;
+use avnu::models::{Route, AmmRoute};
 
 #[starknet::interface]
 trait IExchange<TContractState> {
@@ -378,6 +378,8 @@ mod Exchange {
                 return;
             }
 
+            let this_aggregator_address = get_contract_address();
+
             // Retrieve current route
             let route: Route = routes.pop_front().unwrap();
 
@@ -392,21 +394,64 @@ mod Exchange {
             );
             assert(overflows == false, 'Overflow: Invalid percent');
 
-            // Get adapter class hash
-            let adapter_class_hash = self.get_adapter_class_hash(route.exchange_address);
-            assert(!adapter_class_hash.is_zero(), 'Unknown exchange');
+            let mut thisRouteAmmsArr = route.path;
+            let mut amountIn = token_from_amount;
+            // path: Array<AmmRoute>, => loop this array to get the final result 
+            // loop {
+            //     match thisRouteAmmsArr.pop_front() {
+            //         Option::Some(this_amm_route) => {
+            //             let this_amm_route = thisRouteAmmsArr.pop_front().unwrap();
+            //             let adapter_class_hash = self
+            //                 .get_adapter_class_hash(this_amm_route.exchange_address);
+            //             assert(!adapter_class_hash.is_zero(), 'Unknown exchange');
 
-            // Call swap
-            ISwapAdapterLibraryDispatcher { class_hash: adapter_class_hash }
-                .swap(
-                    route.exchange_address,
-                    route.token_from,
-                    token_from_amount,
-                    route.token_to,
-                    0,
-                    contract_address,
-                    route.additional_swap_params,
-                );
+            //             // Call swap
+
+            //             ISwapAdapterLibraryDispatcher { class_hash: adapter_class_hash }
+            //                 .swap(
+            //                     this_amm_route.exchange_address,
+            //                     this_amm_route.token_from,
+            //                     amountIn,
+            //                     this_amm_route.token_to,
+            //                     0,
+            //                     contract_address,
+            //                     this_amm_route.additional_swap_params,
+            //                 );
+            //             let token_from = IERC20Dispatcher {
+            //                 contract_address: this_amm_route.token_to
+            //             };
+            //             amountIn = token_from.balanceOf(this_aggregator_address);
+            //         },
+            //         Option::None(_) => { break self; },
+            //     };
+            // };
+            loop {
+                if thisRouteAmmsArr.len() == 0 { // Break condition
+                    break (self);
+                }
+
+                let this_amm_route = thisRouteAmmsArr.pop_front().unwrap();
+                let adapter_class_hash = self
+                    .get_adapter_class_hash(this_amm_route.exchange_address);
+                assert(!adapter_class_hash.is_zero(), 'Unknown exchange');
+
+                // Call swap
+
+                ISwapAdapterLibraryDispatcher { class_hash: adapter_class_hash }
+                    .swap(
+                        this_amm_route.exchange_address,
+                        this_amm_route.token_from,
+                        amountIn,
+                        this_amm_route.token_to,
+                        0,
+                        contract_address,
+                        this_amm_route.additional_swap_params,
+                    );
+                let token_from = IERC20Dispatcher { contract_address: this_amm_route.token_to };
+                amountIn = token_from.balanceOf(this_aggregator_address);
+            };
+
+            // Get adapter class hash
 
             self.apply_routes(routes, contract_address);
         }
