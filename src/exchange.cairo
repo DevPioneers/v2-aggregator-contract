@@ -427,7 +427,7 @@ mod Exchange {
             // };
             loop {
                 if thisRouteAmmsArr.len() == 0 { // Break condition
-                    break (self);
+                    break (self = unsafe_new_contract_state());
                 }
 
                 let this_amm_route = thisRouteAmmsArr.pop_front().unwrap();
