@@ -1,5 +1,5 @@
 use starknet::{ContractAddress, ClassHash};
-use avnu::models::{Route, AmmRoute};
+use avnu::models::{Route};
 
 #[starknet::interface]
 trait IExchange<TContractState> {
@@ -55,6 +55,8 @@ mod Exchange {
 
     const MAX_AVNU_FEES_BPS: u128 = 100;
     const MAX_INTEGRATOR_FEES_BPS: u128 = 500;
+    const CONTRACT_BALANCE: u256 =
+        57896044618658097711785492504343953926634992332820282019728792003956564819968;
 
     #[storage]
     struct Storage {
@@ -229,8 +231,8 @@ mod Exchange {
             assert(route_len > 0, 'Routes is empty');
             let first_route: @Route = routes[0];
             let last_route: @Route = routes[route_len - 1];
-            assert(*first_route.token_from == token_from_address, 'Invalid token from');
-            assert(*last_route.token_to == token_to_address, 'Invalid token to');
+            // assert(*first_route.token_from == token_from_address, 'Invalid token from');
+            // assert(*last_route.token_to == token_to_address, 'Invalid token to');
             self.apply_routes(routes, contract_address);
 
             // Execute all the post-swap actions (verify min amount, collect fees, transfer tokens, emit event...)
@@ -252,7 +254,7 @@ mod Exchange {
             let mut checked_tokens: Felt252Dict<u64> = Default::default();
             // Token to has already been checked
             checked_tokens.insert(token_to_address.into(), 1);
-            self.assert_no_remaining_tokens(contract_address, routes_span, checked_tokens);
+            // self.assert_no_remaining_tokens(contract_address, routes_span, checked_tokens);
             true
         }
     }
@@ -335,25 +337,25 @@ mod Exchange {
                 );
         }
 
-        fn assert_no_remaining_tokens(
-            ref self: ContractState,
-            contract_address: ContractAddress,
-            mut routes: Span<Route>,
-            mut checked_tokens: Felt252Dict<u64>
-        ) {
-            if routes.len() == 0 {
-                return;
-            }
+        // fn assert_no_remaining_tokens(
+        //     ref self: ContractState,
+        //     contract_address: ContractAddress,
+        //     mut routes: Span<Route>,
+        //     mut checked_tokens: Felt252Dict<u64>
+        // ) {
+        //     if routes.len() == 0 {
+        //         return;
+        //     }
 
-            // Retrieve current route
-            let route: @Route = routes.pop_front().unwrap();
+        //     // Retrieve current route
+        //     let route: @Route = routes.pop_front().unwrap();
 
-            // Transfer residual tokens
-            self.assert_no_remaining_token(contract_address, *route.token_from, ref checked_tokens);
-            self.assert_no_remaining_token(contract_address, *route.token_to, ref checked_tokens);
+        //     // Transfer residual tokens
+        //     self.assert_no_remaining_token(contract_address, *route.token_from, ref checked_tokens);
+        //     self.assert_no_remaining_token(contract_address, *route.token_to, ref checked_tokens);
 
-            self.assert_no_remaining_tokens(contract_address, routes, checked_tokens);
-        }
+        //     self.assert_no_remaining_tokens(contract_address, routes, checked_tokens);
+        // }
 
         fn assert_no_remaining_token(
             ref self: ContractState,
@@ -383,19 +385,18 @@ mod Exchange {
             // Retrieve current route
             let route: Route = routes.pop_front().unwrap();
 
-            // Calculating tokens to be passed to the exchange
-            // percentage should be 2 for 2%
-            assert(route.percent > 0, 'Invalid route percent');
-            assert(route.percent <= 100, 'Invalid route percent');
-            let token_from_balance = IERC20Dispatcher { contract_address: route.token_from }
-                .balanceOf(contract_address);
-            let (token_from_amount, overflows) = muldiv(
-                token_from_balance, route.percent.into(), 100_u256, false
-            );
-            assert(overflows == false, 'Overflow: Invalid percent');
+            // // Calculating tokens to be passed to the exchange
+            // // percentage should be 2 for 2%
+            // assert(route.percent > 0, 'Invalid route percent');
+            // assert(route.percent <= 100, 'Invalid route percent');
+            // let token_from_balance = IERC20Dispatcher { contract_address: route.token_from }
+            //     .balanceOf(contract_address);
+            // let (token_from_amount, overflows) = muldiv(
+            //     token_from_balance, route.percent.into(), 100_u256, false
+            // );
+            // assert(overflows == false, 'Overflow: Invalid percent');
 
-            let mut thisRouteAmmsArr = route.path;
-            let mut amountIn = token_from_amount;
+            let mut amountIn = route.amountIn;
             // path: Array<AmmRoute>, => loop this array to get the final result 
             // loop {
             //     match thisRouteAmmsArr.pop_front() {
@@ -425,33 +426,27 @@ mod Exchange {
             //         Option::None(_) => { break self; },
             //     };
             // };
-            loop {
-                if thisRouteAmmsArr.len() == 0 { // Break condition
-                    break (self = unsafe_new_contract_state());
-                }
 
-                let this_amm_route = thisRouteAmmsArr.pop_front().unwrap();
-                let adapter_class_hash = self
-                    .get_adapter_class_hash(this_amm_route.exchange_address);
-                assert(!adapter_class_hash.is_zero(), 'Unknown exchange');
+            let adapter_class_hash = self.get_adapter_class_hash(route.exchange_address);
+            assert(!adapter_class_hash.is_zero(), 'Unknown amm');
 
-                // Call swap
-
-                ISwapAdapterLibraryDispatcher { class_hash: adapter_class_hash }
-                    .swap(
-                        this_amm_route.exchange_address,
-                        this_amm_route.token_from,
-                        amountIn,
-                        this_amm_route.token_to,
-                        0,
-                        contract_address,
-                        this_amm_route.additional_swap_params,
-                    );
-                let token_from = IERC20Dispatcher { contract_address: this_amm_route.token_to };
+            // Call swap
+            // Todo: check if amountIn is CONTRACT_BALANCE
+            if (amountIn == CONTRACT_BALANCE) {
+                let token_from_addr = *route.path[0];
+                let token_from = IERC20Dispatcher { contract_address: token_from_addr };
                 amountIn = token_from.balanceOf(this_aggregator_address);
-            };
+            }
 
-            // Get adapter class hash
+            ISwapAdapterLibraryDispatcher { class_hash: adapter_class_hash }
+                .swap(
+                    route.exchange_address,
+                    amountIn,
+                    0,
+                    route.path,
+                    this_aggregator_address,
+                    route.additional_swap_params,
+                );
 
             self.apply_routes(routes, contract_address);
         }
