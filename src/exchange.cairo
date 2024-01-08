@@ -71,6 +71,7 @@ mod Exchange {
         fees_bps_1: u128,
         aggregator_fee: u256,
         fees_recipient: ContractAddress,
+        is_lock: bool,
     }
 
     #[event]
@@ -228,6 +229,8 @@ mod Exchange {
             routes: Array<Route>,
             trade_type: u64,
         ) -> bool {
+            self.only_unlock();
+            self.lock_contract();
             let caller_address = get_caller_address();
             let router_address = get_contract_address();
             let route_len = routes.len();
@@ -268,6 +271,7 @@ mod Exchange {
             // Token to has already been checked
             checked_tokens.insert(token_to_address.into(), 1);
             // self.assert_no_remaining_tokens(contract_address, routes_span, checked_tokens);
+            self.unlock_contract();
             true
         }
     }
@@ -489,6 +493,15 @@ mod Exchange {
             } else {
                 0
             }
+        }
+        fn lock_contract(ref self: ContractState) {
+            self.is_lock.write(true);
+        }
+        fn unlock_contract(ref self: ContractState) {
+            self.is_lock.write(false);
+        }
+        fn only_unlock(ref self: ContractState) {
+            assert(self.is_lock.read() == false, 'Reentrancy');
         }
     }
 }
