@@ -20,6 +20,9 @@ trait IExchange<TContractState> {
     fn set_fees_bps_0(ref self: TContractState, bps: u128) -> bool;
     fn get_fees_bps_1(self: @TContractState) -> u128;
     fn set_fees_bps_1(ref self: TContractState, bps: u128) -> bool;
+    fn get_aggregator_fee(self: @TContractState) -> u256;
+    fn set_aggregator_fee(ref self: TContractState, bps: u256) -> bool;
+
     fn multi_route_swap(
         ref self: TContractState,
         token_from_address: ContractAddress,
@@ -31,6 +34,7 @@ trait IExchange<TContractState> {
         integrator_fee_amount_bps: u128,
         integrator_fee_recipient: ContractAddress,
         routes: Array<Route>,
+        trade_type: u64,
     ) -> bool;
 }
 
@@ -65,6 +69,7 @@ mod Exchange {
         fees_active: bool,
         fees_bps_0: u128,
         fees_bps_1: u128,
+        aggregator_fee: u256,
         fees_recipient: ContractAddress,
     }
 
@@ -82,7 +87,6 @@ mod Exchange {
         sell_amount: u256,
         buy_address: ContractAddress,
         buy_amount: u256,
-        beneficiary: ContractAddress,
     }
 
     #[derive(starknet::Event, Drop, PartialEq)]
@@ -120,7 +124,8 @@ mod Exchange {
     ) {
         // Set owner & fee collector address
         self._transfer_ownership(owner);
-        self.fees_recipient.write(fee_recipient)
+        self.fees_recipient.write(fee_recipient);
+        self.aggregator_fee.write(0);
     }
 
     #[external(v0)]
@@ -199,6 +204,16 @@ mod Exchange {
             self.fees_bps_1.write(bps);
             true
         }
+        fn get_aggregator_fee(self: @ContractState) -> u256 {
+            self.aggregator_fee.read()
+        }
+
+        fn set_aggregator_fee(ref self: ContractState, bps: u256) -> bool {
+            self.assert_only_owner();
+            self.aggregator_fee.write(bps);
+            true
+        }
+
 
         fn multi_route_swap(
             ref self: ContractState,
@@ -211,20 +226,22 @@ mod Exchange {
             integrator_fee_amount_bps: u128,
             integrator_fee_recipient: ContractAddress,
             routes: Array<Route>,
+            trade_type: u64,
         ) -> bool {
             let caller_address = get_caller_address();
-            let contract_address = get_contract_address();
+            let router_address = get_contract_address();
             let route_len = routes.len();
             let routes_span = routes.span();
 
             // Execute all the pre-swap actions (some checks, retrieve token from...)
             self
                 .before_swap(
-                    contract_address,
+                    router_address,
                     caller_address,
                     token_from_address,
                     token_from_amount,
-                    beneficiary
+                    beneficiary,
+                    trade_type
                 );
 
             // Swap
@@ -233,21 +250,17 @@ mod Exchange {
             let last_route: @Route = routes[route_len - 1];
             // assert(*first_route.token_from == token_from_address, 'Invalid token from');
             // assert(*last_route.token_to == token_to_address, 'Invalid token to');
-            self.apply_routes(routes, contract_address);
+            self.apply_routes(routes, router_address, trade_type);
 
             // Execute all the post-swap actions (verify min amount, collect fees, transfer tokens, emit event...)
             self
                 .after_swap(
-                    contract_address,
-                    caller_address,
                     token_from_address,
                     token_from_amount,
                     token_to_address,
                     token_to_min_amount,
-                    beneficiary,
-                    integrator_fee_amount_bps,
-                    integrator_fee_recipient,
-                    route_len
+                    route_len,
+                    trade_type
                 );
 
             // Dict of bools are supported yet
@@ -281,6 +294,7 @@ mod Exchange {
             token_from_address: ContractAddress,
             token_from_amount: u256,
             beneficiary: ContractAddress,
+            trade_type: u64,
         ) {
             // In the future, the beneficiary may not be the caller
             // Check if beneficiary == caller_address
@@ -296,32 +310,40 @@ mod Exchange {
 
         fn after_swap(
             ref self: ContractState,
-            contract_address: ContractAddress,
-            caller_address: ContractAddress,
             token_from_address: ContractAddress,
             token_from_amount: u256,
             token_to_address: ContractAddress,
             token_to_min_amount: u256,
-            beneficiary: ContractAddress,
-            integrator_fee_amount_bps: u128,
-            integrator_fee_recipient: ContractAddress,
-            route_len: usize
+            route_len: usize,
+            trade_type: u64,
         ) {
             // Collect fees
+            let caller_address = get_caller_address();
             let token_to = IERC20Dispatcher { contract_address: token_to_address };
-            let received_token_to = token_to.balanceOf(contract_address);
-            let token_to_final_amount = self
-                .collect_fees(
-                    token_to,
-                    received_token_to,
-                    integrator_fee_amount_bps,
-                    integrator_fee_recipient,
-                    route_len
-                );
+            let received_token_to = token_to.balanceOf(get_contract_address());
+            // let token_to_final_amount = self
+            //     .collect_fees(
+            //         token_to,
+            //         received_token_to,
+            //         integrator_fee_amount_bps,
+            //         integrator_fee_recipient,
+            //         route_len
+            //     );
 
             // Check amount of token to and transfer tokens
-            assert(token_to_min_amount <= token_to_final_amount, 'Insufficient tokens received');
-            token_to.transfer(beneficiary, token_to_final_amount);
+            let mut diff_balance = 0;
+            let mut contract_fee = 0;
+            let mut user_received = 0;
+            if trade_type == 0 {
+                assert(token_to_min_amount <= received_token_to, 'Insufficient tokens received');
+                contract_fee = received_token_to * self.aggregator_fee.read() / 10000_u256;
+                if contract_fee > received_token_to - token_to_min_amount {
+                    contract_fee = received_token_to - token_to_min_amount;
+                }
+                user_received = received_token_to - contract_fee;
+                token_to.transfer(self.fees_recipient.read(), contract_fee);
+                token_to.transfer(caller_address, user_received);
+            } else if trade_type == 1 {} else {}
 
             // Emit event
             self
@@ -331,8 +353,7 @@ mod Exchange {
                         sell_address: token_from_address,
                         sell_amount: token_from_amount,
                         buy_address: token_to_address,
-                        buy_amount: token_to_final_amount,
-                        beneficiary: beneficiary
+                        buy_amount: user_received
                     }
                 );
         }
@@ -374,7 +395,10 @@ mod Exchange {
         }
 
         fn apply_routes(
-            ref self: ContractState, mut routes: Array<Route>, contract_address: ContractAddress
+            ref self: ContractState,
+            mut routes: Array<Route>,
+            contract_address: ContractAddress,
+            trade_type: u64
         ) {
             if (routes.len() == 0) {
                 return;
@@ -384,49 +408,7 @@ mod Exchange {
 
             // Retrieve current route
             let route: Route = routes.pop_front().unwrap();
-
-            // // Calculating tokens to be passed to the exchange
-            // // percentage should be 2 for 2%
-            // assert(route.percent > 0, 'Invalid route percent');
-            // assert(route.percent <= 100, 'Invalid route percent');
-            // let token_from_balance = IERC20Dispatcher { contract_address: route.token_from }
-            //     .balanceOf(contract_address);
-            // let (token_from_amount, overflows) = muldiv(
-            //     token_from_balance, route.percent.into(), 100_u256, false
-            // );
-            // assert(overflows == false, 'Overflow: Invalid percent');
-
             let mut amountIn = route.amountIn;
-            // path: Array<AmmRoute>, => loop this array to get the final result 
-            // loop {
-            //     match thisRouteAmmsArr.pop_front() {
-            //         Option::Some(this_amm_route) => {
-            //             let this_amm_route = thisRouteAmmsArr.pop_front().unwrap();
-            //             let adapter_class_hash = self
-            //                 .get_adapter_class_hash(this_amm_route.exchange_address);
-            //             assert(!adapter_class_hash.is_zero(), 'Unknown exchange');
-
-            //             // Call swap
-
-            //             ISwapAdapterLibraryDispatcher { class_hash: adapter_class_hash }
-            //                 .swap(
-            //                     this_amm_route.exchange_address,
-            //                     this_amm_route.token_from,
-            //                     amountIn,
-            //                     this_amm_route.token_to,
-            //                     0,
-            //                     contract_address,
-            //                     this_amm_route.additional_swap_params,
-            //                 );
-            //             let token_from = IERC20Dispatcher {
-            //                 contract_address: this_amm_route.token_to
-            //             };
-            //             amountIn = token_from.balanceOf(this_aggregator_address);
-            //         },
-            //         Option::None(_) => { break self; },
-            //     };
-            // };
-
             let adapter_class_hash = self.get_adapter_class_hash(route.exchange_address);
             assert(!adapter_class_hash.is_zero(), 'Unknown amm');
 
@@ -448,7 +430,7 @@ mod Exchange {
                     route.additional_swap_params,
                 );
 
-            self.apply_routes(routes, contract_address);
+            self.apply_routes(routes, contract_address, trade_type);
         }
 
         fn collect_fees(
