@@ -34,7 +34,7 @@ mod JediswapAdapter {
             to: ContractAddress,
             additional_swap_params: Array<felt252>,
         ) {
-            assert(additional_swap_params.len() == 0, 'Invalid swap params');
+            // assert(additional_swap_params.len() == 0, 'Invalid swap params');
 
             // Init path
             // Init deadline

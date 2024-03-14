@@ -43,7 +43,7 @@ mod SithswapAdapter {
             to: ContractAddress,
             additional_swap_params: Array<felt252>,
         ) {
-            assert(additional_swap_params.len() == 1, 'Invalid swap params');
+            // assert(additional_swap_params.len() == 1, 'Invalid swap params');
             assert(path.len() == 2, 'Invalid sith swap params');
 
             // // Init routes
