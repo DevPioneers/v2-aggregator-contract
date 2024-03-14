@@ -137,3 +137,5 @@ dmypy.json
 # vscode project settings
 .vscode/
 .idea
+
+scripts

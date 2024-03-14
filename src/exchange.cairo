@@ -12,27 +12,18 @@ trait IExchange<TContractState> {
     fn set_adapter_class_hash(
         ref self: TContractState, exchange_address: ContractAddress, adapter_class_hash: ClassHash
     ) -> bool;
-    fn get_fees_active(self: @TContractState) -> bool;
-    fn set_fees_active(ref self: TContractState, active: bool) -> bool;
     fn get_fees_recipient(self: @TContractState) -> ContractAddress;
     fn set_fees_recipient(ref self: TContractState, recipient: ContractAddress) -> bool;
-    fn get_fees_bps_0(self: @TContractState) -> u128;
-    fn set_fees_bps_0(ref self: TContractState, bps: u128) -> bool;
-    fn get_fees_bps_1(self: @TContractState) -> u128;
-    fn set_fees_bps_1(ref self: TContractState, bps: u128) -> bool;
     fn get_aggregator_fee(self: @TContractState) -> u256;
     fn set_aggregator_fee(ref self: TContractState, bps: u256) -> bool;
 
-    fn multi_route_swap(
+    fn aggregator_swap(
         ref self: TContractState,
-        token_from_address: ContractAddress,
+        token_in: ContractAddress,
         token_from_amount: u256,
-        token_to_address: ContractAddress,
+        token_out: ContractAddress,
         token_to_amount: u256,
-        token_to_min_amount: u256,
-        beneficiary: ContractAddress,
-        integrator_fee_amount_bps: u128,
-        integrator_fee_recipient: ContractAddress,
+        amount: u256,
         routes: Array<Route>,
         trade_type: u64,
     ) -> bool;
@@ -61,6 +52,7 @@ mod Exchange {
     const MAX_INTEGRATOR_FEES_BPS: u128 = 500;
     const CONTRACT_BALANCE: u256 =
         57896044618658097711785492504343953926634992332820282019728792003956564819968;
+
 
     #[storage]
     struct Storage {
@@ -164,16 +156,6 @@ mod Exchange {
             true
         }
 
-        fn get_fees_active(self: @ContractState) -> bool {
-            self.fees_active.read()
-        }
-
-        fn set_fees_active(ref self: ContractState, active: bool) -> bool {
-            self.assert_only_owner();
-            self.fees_active.write(active);
-            true
-        }
-
         fn get_fees_recipient(self: @ContractState) -> ContractAddress {
             self.fees_recipient.read()
         }
@@ -184,27 +166,6 @@ mod Exchange {
             true
         }
 
-        fn get_fees_bps_0(self: @ContractState) -> u128 {
-            self.fees_bps_0.read()
-        }
-
-        fn set_fees_bps_0(ref self: ContractState, bps: u128) -> bool {
-            self.assert_only_owner();
-            assert(bps <= MAX_AVNU_FEES_BPS, 'Fees are too high');
-            self.fees_bps_0.write(bps);
-            true
-        }
-
-        fn get_fees_bps_1(self: @ContractState) -> u128 {
-            self.fees_bps_1.read()
-        }
-
-        fn set_fees_bps_1(ref self: ContractState, bps: u128) -> bool {
-            self.assert_only_owner();
-            assert(bps <= MAX_AVNU_FEES_BPS, 'Fees are too high');
-            self.fees_bps_1.write(bps);
-            true
-        }
         fn get_aggregator_fee(self: @ContractState) -> u256 {
             self.aggregator_fee.read()
         }
@@ -214,18 +175,13 @@ mod Exchange {
             self.aggregator_fee.write(bps);
             true
         }
-
-
-        fn multi_route_swap(
+        fn aggregator_swap(
             ref self: ContractState,
-            token_from_address: ContractAddress,
+            token_in: ContractAddress,
             token_from_amount: u256,
-            token_to_address: ContractAddress,
+            token_out: ContractAddress,
             token_to_amount: u256,
-            token_to_min_amount: u256,
-            beneficiary: ContractAddress,
-            integrator_fee_amount_bps: u128,
-            integrator_fee_recipient: ContractAddress,
+            amount: u256,
             routes: Array<Route>,
             trade_type: u64,
         ) -> bool {
@@ -233,44 +189,57 @@ mod Exchange {
             self.lock_contract();
             let caller_address = get_caller_address();
             let router_address = get_contract_address();
+
             let route_len = routes.len();
             let routes_span = routes.span();
+            assert(route_len > 0, 'Routes is empty');
+            let token_in_dispatcher = IERC20Dispatcher { contract_address: token_in };
+            let token_out_dispatcher = IERC20Dispatcher { contract_address: token_out };
 
-            // Execute all the pre-swap actions (some checks, retrieve token from...)
-            self
-                .before_swap(
-                    router_address,
-                    caller_address,
-                    token_from_address,
-                    token_from_amount,
-                    beneficiary,
-                    trade_type
+            // Transfer tokens to contract
+            assert(token_from_amount > 0, 'Token from amount is 0');
+            token_in_dispatcher.transferFrom(caller_address, router_address, token_from_amount);
+
+            // First get balance of user and contract before swap
+            let (_, balance_contract_before_out, balance_user_before_in, _) = self
+                .get_balance_tokens_in_out(
+                    token_in_dispatcher, token_out_dispatcher, caller_address, trade_type
                 );
 
-            // Swap
-            assert(route_len > 0, 'Routes is empty');
-            let first_route: @Route = routes[0];
-            let last_route: @Route = routes[route_len - 1];
-            // assert(*first_route.token_from == token_from_address, 'Invalid token from');
-            // assert(*last_route.token_to == token_to_address, 'Invalid token to');
             self.apply_routes(routes, router_address, trade_type);
 
-            // Execute all the post-swap actions (verify min amount, collect fees, transfer tokens, emit event...)
-            self
-                .after_swap(
-                    token_from_address,
-                    token_from_amount,
-                    token_to_address,
-                    token_to_min_amount,
-                    route_len,
-                    trade_type
+            let (_, balance_contract_after_out, balance_user_after_in, _) = self
+                .get_balance_tokens_in_out(
+                    token_in_dispatcher, token_out_dispatcher, caller_address, trade_type
                 );
+            let mut diff_balance = 0_u256;
+            if trade_type == 0 {
+                diff_balance = balance_contract_after_out - balance_contract_before_out;
+                assert(diff_balance >= amount, 'less than min_amount_out');
+                let mut contract_fee = diff_balance * self.aggregator_fee.read() / 10000_u256;
+                if contract_fee > diff_balance - amount {
+                    contract_fee = diff_balance - amount;
+                }
+                let user_received = diff_balance - contract_fee;
+                token_out_dispatcher.transfer(self.fees_recipient.read(), contract_fee);
+                token_out_dispatcher.transfer(caller_address, user_received);
+            } else {
+                diff_balance = balance_user_before_in - balance_user_after_in;
+                assert(diff_balance <= amount, 'greater than max_amount_in');
+                let mut contract_fee = diff_balance * self.aggregator_fee.read() / 10000_u256;
+                if contract_fee > amount - diff_balance {
+                    contract_fee = amount - diff_balance;
+                }
+                if contract_fee > 0 {
+                    token_in_dispatcher
+                        .transferFrom(caller_address, self.fees_recipient.read(), contract_fee);
+                }
+                token_out_dispatcher
+                    .transfer(
+                        caller_address, balance_contract_after_out - balance_contract_before_out
+                    );
+            }
 
-            // Dict of bools are supported yet
-            let mut checked_tokens: Felt252Dict<u64> = Default::default();
-            // Token to has already been checked
-            checked_tokens.insert(token_to_address.into(), 1);
-            // self.assert_no_remaining_tokens(contract_address, routes_span, checked_tokens);
             self.unlock_contract();
             true
         }
@@ -307,8 +276,8 @@ mod Exchange {
             // Transfer tokens to contract
             assert(token_from_amount > 0, 'Token from amount is 0');
             let token_from = IERC20Dispatcher { contract_address: token_from_address };
-            let token_from_balance = token_from.balanceOf(caller_address);
-            assert(token_from_balance >= token_from_amount, 'Token from balance is too low');
+            // let token_from_balance = token_from.balanceOf(caller_address);
+            // assert(token_from_balance >= token_from_amount, 'Token from balance is too low');
             token_from.transferFrom(caller_address, contract_address, token_from_amount);
         }
 
@@ -325,14 +294,6 @@ mod Exchange {
             let caller_address = get_caller_address();
             let token_to = IERC20Dispatcher { contract_address: token_to_address };
             let received_token_to = token_to.balanceOf(get_contract_address());
-            // let token_to_final_amount = self
-            //     .collect_fees(
-            //         token_to,
-            //         received_token_to,
-            //         integrator_fee_amount_bps,
-            //         integrator_fee_recipient,
-            //         route_len
-            //     );
 
             // Check amount of token to and transfer tokens
             let mut diff_balance = 0;
@@ -361,43 +322,6 @@ mod Exchange {
                     }
                 );
         }
-
-        // fn assert_no_remaining_tokens(
-        //     ref self: ContractState,
-        //     contract_address: ContractAddress,
-        //     mut routes: Span<Route>,
-        //     mut checked_tokens: Felt252Dict<u64>
-        // ) {
-        //     if routes.len() == 0 {
-        //         return;
-        //     }
-
-        //     // Retrieve current route
-        //     let route: @Route = routes.pop_front().unwrap();
-
-        //     // Transfer residual tokens
-        //     self.assert_no_remaining_token(contract_address, *route.token_from, ref checked_tokens);
-        //     self.assert_no_remaining_token(contract_address, *route.token_to, ref checked_tokens);
-
-        //     self.assert_no_remaining_tokens(contract_address, routes, checked_tokens);
-        // }
-
-        fn assert_no_remaining_token(
-            ref self: ContractState,
-            contract_address: ContractAddress,
-            token_address: ContractAddress,
-            ref checked_tokens: Felt252Dict<u64>
-        ) {
-            // Only do the check when token balance has not already been checked
-            if checked_tokens.get(token_address.into()) == 0 {
-                // Check balance and transfer tokens if necessary
-                let token = IERC20Dispatcher { contract_address: token_address };
-                let token_balance = token.balanceOf(contract_address);
-                assert(token_balance == 0, 'Residual tokens');
-                checked_tokens.insert(token_address.into(), 1);
-            }
-        }
-
         fn apply_routes(
             ref self: ContractState,
             mut routes: Array<Route>,
@@ -424,76 +348,23 @@ mod Exchange {
                 amountIn = token_from.balanceOf(this_aggregator_address);
             }
 
-            ISwapAdapterLibraryDispatcher { class_hash: adapter_class_hash }
-                .swap(
-                    route.exchange_address,
-                    amountIn,
-                    0,
-                    route.path,
-                    this_aggregator_address,
-                    route.additional_swap_params,
-                );
+            if (trade_type == 0) {
+                /// for exact in 
+                ISwapAdapterLibraryDispatcher { class_hash: adapter_class_hash }
+                    .swap(
+                        route.exchange_address,
+                        amountIn,
+                        0,
+                        route.path,
+                        this_aggregator_address,
+                        route.additional_swap_params,
+                    );
+            } else { /// for exact out
+            }
 
             self.apply_routes(routes, contract_address, trade_type);
         }
 
-        fn collect_fees(
-            ref self: ContractState,
-            token: IERC20Dispatcher,
-            amount: u256,
-            integrator_fee_amount_bps: u128,
-            integrator_fee_recipient: ContractAddress,
-            route_len: usize
-        ) -> u256 {
-            // Collect integrator's fees
-            assert(
-                integrator_fee_amount_bps <= MAX_INTEGRATOR_FEES_BPS, 'Integrator fees are too high'
-            );
-            let integrator_fees_collected = self
-                .collect_fee_bps(
-                    token, amount, integrator_fee_amount_bps, integrator_fee_recipient, true
-                );
-
-            // Collect AVNU's fees
-            let bps = if route_len > 1 {
-                self.get_fees_bps_1()
-            } else {
-                self.get_fees_bps_0()
-            };
-            let avnu_fees_collected = self
-                .collect_fee_bps(
-                    token, amount, bps, self.get_fees_recipient(), self.get_fees_active()
-                );
-
-            // Compute and return amount minus fees
-            amount - integrator_fees_collected - avnu_fees_collected
-        }
-
-        fn collect_fee_bps(
-            ref self: ContractState,
-            token: IERC20Dispatcher,
-            amount: u256,
-            fee_amount_bps: u128,
-            fee_recipient: ContractAddress,
-            is_active: bool
-        ) -> u256 {
-            // Fee collector is active when recipient & amount are defined, don't throw exception for UX purpose
-            // -> It's integrator work to defined it correctly
-            if (!fee_amount_bps.is_zero() && !fee_recipient.is_zero() && is_active) {
-                // Compute fee amount
-                let (fee_amount, overflows) = muldiv(
-                    amount, fee_amount_bps.into(), 10000_u256, false
-                );
-                assert(overflows == false, 'Overflow: Invalid fee');
-
-                // Collect fees from contract
-                token.transfer(fee_recipient, fee_amount);
-
-                fee_amount
-            } else {
-                0
-            }
-        }
         fn lock_contract(ref self: ContractState) {
             self.is_lock.write(true);
         }
@@ -502,6 +373,32 @@ mod Exchange {
         }
         fn only_unlock(ref self: ContractState) {
             assert(self.is_lock.read() == false, 'Reentrancy');
+        }
+        fn get_balance_tokens_in_out(
+            ref self: ContractState,
+            token_in_dispatcher: IERC20Dispatcher,
+            token_out_dispatcher: IERC20Dispatcher,
+            user: ContractAddress,
+            trade_type: u64
+        ) -> (u256, u256, u256, u256) {
+            let mut balance_contract_token_in = 0;
+            let mut balance_contract_token_out = 0;
+            let mut balance_user_token_in = 0;
+            let mut balance_user_token_out = 0;
+            let router_address = get_contract_address();
+
+            assert(trade_type == 0 || trade_type == 1, 'wrong trade type');
+            balance_contract_token_in = token_in_dispatcher.balanceOf(router_address);
+            balance_contract_token_out = token_out_dispatcher.balanceOf(router_address);
+            balance_user_token_in = token_in_dispatcher.balanceOf(user);
+            balance_user_token_out = token_out_dispatcher.balanceOf(user);
+
+            (
+                balance_contract_token_in,
+                balance_contract_token_out,
+                balance_user_token_in,
+                balance_user_token_out
+            )
         }
     }
 }
