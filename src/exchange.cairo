@@ -58,9 +58,6 @@ mod Exchange {
     struct Storage {
         Ownable_owner: ContractAddress,
         AdapterClassHash: LegacyMap<ContractAddress, ClassHash>,
-        fees_active: bool,
-        fees_bps_0: u128,
-        fees_bps_1: u128,
         aggregator_fee: u256,
         fees_recipient: ContractAddress,
         is_lock: bool,
