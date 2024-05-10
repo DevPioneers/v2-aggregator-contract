@@ -256,69 +256,6 @@ mod Exchange {
             self.Ownable_owner.write(new_owner);
             self.emit(OwnershipTransferred { previous_owner, new_owner });
         }
-
-        fn before_swap(
-            ref self: ContractState,
-            contract_address: ContractAddress,
-            caller_address: ContractAddress,
-            token_from_address: ContractAddress,
-            token_from_amount: u256,
-            beneficiary: ContractAddress,
-            trade_type: u64,
-        ) {
-            // In the future, the beneficiary may not be the caller
-            // Check if beneficiary == caller_address
-            assert(beneficiary == caller_address, 'Beneficiary is not the caller');
-
-            // Transfer tokens to contract
-            assert(token_from_amount > 0, 'Token from amount is 0');
-            let token_from = IERC20Dispatcher { contract_address: token_from_address };
-            // let token_from_balance = token_from.balanceOf(caller_address);
-            // assert(token_from_balance >= token_from_amount, 'Token from balance is too low');
-            token_from.transferFrom(caller_address, contract_address, token_from_amount);
-        }
-
-        fn after_swap(
-            ref self: ContractState,
-            token_from_address: ContractAddress,
-            token_from_amount: u256,
-            token_to_address: ContractAddress,
-            token_to_min_amount: u256,
-            route_len: usize,
-            trade_type: u64,
-        ) {
-            // Collect fees
-            let caller_address = get_caller_address();
-            let token_to = IERC20Dispatcher { contract_address: token_to_address };
-            let received_token_to = token_to.balanceOf(get_contract_address());
-
-            // Check amount of token to and transfer tokens
-            let mut diff_balance = 0;
-            let mut contract_fee = 0;
-            let mut user_received = 0;
-            if trade_type == 0 {
-                assert(token_to_min_amount <= received_token_to, 'Insufficient tokens received');
-                contract_fee = received_token_to * self.aggregator_fee.read() / 10000_u256;
-                if contract_fee > received_token_to - token_to_min_amount {
-                    contract_fee = received_token_to - token_to_min_amount;
-                }
-                user_received = received_token_to - contract_fee;
-                token_to.transfer(self.fees_recipient.read(), contract_fee);
-                token_to.transfer(caller_address, user_received);
-            } else if trade_type == 1 {} else {}
-
-            // Emit event
-            self
-                .emit(
-                    Swap {
-                        taker_address: caller_address,
-                        sell_address: token_from_address,
-                        sell_amount: token_from_amount,
-                        buy_address: token_to_address,
-                        buy_amount: user_received
-                    }
-                );
-        }
         fn apply_routes(
             ref self: ContractState,
             mut routes: Array<Route>,
