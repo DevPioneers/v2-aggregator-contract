@@ -17,6 +17,7 @@ trait IExchange<TContractState> {
     fn get_aggregator_fee(self: @TContractState) -> u256;
     fn set_aggregator_fee(ref self: TContractState, bps: u256) -> bool;
 
+    // the heart of CairoSwap 
     fn aggregator_swap(
         ref self: TContractState,
         token_in: ContractAddress,
@@ -172,6 +173,7 @@ mod Exchange {
             self.aggregator_fee.write(bps);
             true
         }
+
         fn aggregator_swap(
             ref self: ContractState,
             token_in: ContractAddress,
@@ -294,11 +296,12 @@ mod Exchange {
                         route.additional_swap_params,
                     );
             } else { /// for exact out
+            /// TODO 
             }
 
             self.apply_routes(routes, contract_address, trade_type);
         }
-
+        // start of reentrancy
         fn lock_contract(ref self: ContractState) {
             self.is_lock.write(true);
         }
@@ -308,6 +311,7 @@ mod Exchange {
         fn only_unlock(ref self: ContractState) {
             assert(self.is_lock.read() == false, 'Reentrancy');
         }
+        // end of reentrancy
         fn get_balance_tokens_in_out(
             ref self: ContractState,
             token_in_dispatcher: IERC20Dispatcher,
