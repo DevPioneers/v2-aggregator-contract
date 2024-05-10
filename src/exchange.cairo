@@ -1,5 +1,5 @@
 use starknet::{ContractAddress, ClassHash};
-use avnu::models::{Route};
+use cairoswap::models::{Route};
 
 #[starknet::interface]
 trait IExchange<TContractState> {
@@ -40,18 +40,18 @@ mod Exchange {
     use starknet::{
         replace_class_syscall, ContractAddress, ClassHash, get_caller_address, get_contract_address
     };
-    use avnu::adapters::{ISwapAdapterLibraryDispatcher, ISwapAdapterDispatcherTrait};
-    use avnu::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
-    use avnu::interfaces::locker::{
+    use cairoswap::adapters::{ISwapAdapterLibraryDispatcher, ISwapAdapterDispatcherTrait};
+    use cairoswap::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
+    use cairoswap::interfaces::locker::{
         ILocker, ISwapAfterLockLibraryDispatcher, ISwapAfterLockDispatcherTrait
     };
-    use avnu::math::muldiv::muldiv;
-    use avnu::models::Route;
+    use cairoswap::math::muldiv::muldiv;
+    use cairoswap::models::Route;
 
-    const MAX_AVNU_FEES_BPS: u128 = 100;
+    const MAX_cairoswap_FEES_BPS: u128 = 100;
     const MAX_INTEGRATOR_FEES_BPS: u128 = 500;
     const CONTRACT_BALANCE: u256 =
-        57896044618658097711785492504343953926634992332820282019728792003956564819968;
+        57896044618658097711785492504343953926634992332820282019728792003956564819968_u256;
 
 
     #[storage]

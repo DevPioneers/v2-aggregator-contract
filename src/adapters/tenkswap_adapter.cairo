@@ -21,8 +21,8 @@ trait ITenkSwapRouter<TContractState> {
 
 #[starknet::contract]
 mod TenkswapAdapter {
-    use avnu::adapters::ISwapAdapter;
-    use avnu::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
+    use cairoswap::adapters::ISwapAdapter;
+    use cairoswap::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use super::{ITenkSwapRouterDispatcher, ITenkSwapRouterDispatcherTrait};
     use starknet::{get_block_timestamp, ContractAddress};
     use array::ArrayTrait;

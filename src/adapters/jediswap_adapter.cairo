@@ -14,8 +14,8 @@ trait IJediSwapRouter<TContractState> {
 
 #[starknet::contract]
 mod JediswapAdapter {
-    use avnu::adapters::ISwapAdapter;
-    use avnu::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
+    use cairoswap::adapters::ISwapAdapter;
+    use cairoswap::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use super::{IJediSwapRouterDispatcher, IJediSwapRouterDispatcherTrait};
     use starknet::{get_block_timestamp, ContractAddress};
     use array::ArrayTrait;
