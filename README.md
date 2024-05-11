@@ -1,71 +1,40 @@
-# AVNU Contracts
+# Aggregator Contract
 
-This repository contains the contracts used by [AVNU](https://www.avnu.fi/). You can test them by using our [testnet](https://app.avnu.fi/).
+## Description
+This contract serves as an aggregator for data from multiple sources. It collects and combines data from various providers and provides a unified interface for accessing the aggregated data.
 
-If you want to learn more about AVNU, and how we are able to provide the best execution on Starknet, you can visit our [documentation](https://doc.avnu.fi/).
+## Features
+- Data aggregation: The contract collects data from multiple sources and combines them into a single dataset.
+- Data retrieval: Users can retrieve the aggregated data through the contract's interface.
+- Provider management: The contract allows for the addition and removal of data providers.
 
+## Usage
+To use this contract, follow these steps:
 
-> **Warning**
-> Please note that **AVNU** is still in the early stages of development. Meanwhile kindly proceed with usage at your own discretion and risk.
+1. Deploy the contract to the desired blockchain network.
+2. Add data providers by calling the appropriate contract function.
+3. Retrieve the aggregated data by calling the contract's data retrieval function.
 
-## Structure
+## Installation
+To install and run this contract locally, follow these steps:
 
-- **Exchange**: Handles the swap. It contains all the routing logic
+1. Clone the repository: `git clone https://github.com/your-repo.git`
+2. Install the required dependencies: `npm install`
+3. Compile the contract: `npx hardhat compile`
+4. Deploy the contract to a local blockchain network: `npx hardhat run scripts/deploy.js --network localhost`
+5. Use the contract by interacting with its functions.
 
-AVNUExchange uses **Adapter**s to call each AMM. 
-These adapters are declared on Starknet and then called using library calls.
-A mapping of "AMM Router address" to "Adapter class hash" is stored inside the AVNUExchange contract.
+## Contributing
+Contributions are welcome! If you would like to contribute to this project, please follow these guidelines:
 
-## Exchange contract
+1. Fork the repository.
+2. Create a new branch for your feature or bug fix.
+3. Make your changes and commit them.
+4. Push your changes to your forked repository.
+5. Submit a pull request to the main repository.
 
-Here is the interface of the contract: 
+## License
+This project is licensed under the [MIT License](LICENSE).
 
-```cairo
-#[starknet::interface]
-trait IExchange<TContractState> {
-    fn get_owner(self: @TContractState) -> ContractAddress;
-    fn transfer_ownership(ref self: TContractState, new_owner: ContractAddress) -> bool;
-    fn upgrade_class(ref self: TContractState, new_class_hash: ClassHash) -> bool;
-    fn get_adapter_class_hash(
-        self: @TContractState, exchange_address: ContractAddress
-    ) -> ClassHash;
-    fn set_adapter_class_hash(
-        ref self: TContractState, exchange_address: ContractAddress, adapter_class_hash: ClassHash
-    ) -> bool;
-    fn get_fees_active(self: @TContractState) -> bool;
-    fn set_fees_active(ref self: TContractState, active: bool) -> bool;
-    fn get_fees_recipient(self: @TContractState) -> ContractAddress;
-    fn set_fees_recipient(ref self: TContractState, recipient: ContractAddress) -> bool;
-    fn get_fees_bps_0(self: @TContractState) -> u128;
-    fn set_fees_bps_0(ref self: TContractState, bps: u128) -> bool;
-    fn get_fees_bps_1(self: @TContractState) -> u128;
-    fn set_fees_bps_1(ref self: TContractState, bps: u128) -> bool;
-    fn multi_route_swap(
-        ref self: TContractState,
-        token_from_address: ContractAddress,
-        token_from_amount: u256,
-        token_to_address: ContractAddress,
-        token_to_amount: u256,
-        token_to_min_amount: u256,
-        beneficiary: ContractAddress,
-        integrator_fee_amount_bps: u128,
-        integrator_fee_recipient: ContractAddress,
-        routes: Array<Route>,
-    ) -> bool;
-}
-```
-
-## Getting Started
-
-This repository is using [Scarb](https://docs.swmansion.com/scarb/) to install, test, build contracts
-
-```shell
-# Format
-scarb fmt
-
-# Run the tests
-scarb test
-
-# Build contracts
-scarb build
-```
+## Contact
+For any questions or inquiries, please contact [your-email@example.com](mailto:your-email@example.com).

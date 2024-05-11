@@ -21,8 +21,8 @@ trait ITenkSwapRouter<TContractState> {
 
 #[starknet::contract]
 mod TenkswapAdapter {
-    use avnu::adapters::ISwapAdapter;
-    use avnu::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
+    use cairoswap::adapters::ISwapAdapter;
+    use cairoswap::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use super::{ITenkSwapRouterDispatcher, ITenkSwapRouterDispatcherTrait};
     use starknet::{get_block_timestamp, ContractAddress};
     use array::ArrayTrait;
@@ -36,23 +36,19 @@ mod TenkswapAdapter {
         fn swap(
             self: @ContractState,
             exchange_address: ContractAddress,
-            token_from_address: ContractAddress,
             token_from_amount: u256,
-            token_to_address: ContractAddress,
             token_to_min_amount: u256,
+            path: Array<ContractAddress>,
             to: ContractAddress,
             additional_swap_params: Array<felt252>,
         ) {
-            assert(additional_swap_params.len() == 0, 'Invalid swap params');
-
-            // Init path
-            let path = array![token_from_address, token_to_address];
+            // assert(additional_swap_params.len() == 0, 'Invalid swap params');
 
             // Init deadline
             let block_timestamp = get_block_timestamp();
             let deadline = block_timestamp;
 
-            IERC20Dispatcher { contract_address: token_from_address }
+            IERC20Dispatcher { contract_address: *path[0] }
                 .approve(exchange_address, token_from_amount);
             ITenkSwapRouterDispatcher { contract_address: exchange_address }
                 .swapExactTokensForTokens(
